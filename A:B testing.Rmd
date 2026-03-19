@@ -1,0 +1,194 @@
+---
+title: "A/B Testing"
+author: "Chloe Shin"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.align = "center")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 68), tidy = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+set.seed(0)
+```
+
+## Data Preparation
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+library(scales)
+library(lubridate)
+```
+```{r}
+control <- read.csv("/Users/chloeshin/Downloads/archive/control_group.csv", sep = ";")
+test <- read.csv("/Users/chloeshin/Downloads/archive/test_group.csv", sep = ";")
+```
+
+```{r}
+colnames(control) <- c("Campaign", "Date", "Spend", "Impressions", "Reaches", "Clicks", "Searches", "Views", "Cart", "Purchases")
+colnames(test) <- colnames(control)
+
+df <- rbind(control, test)
+df$Date <- dmy(df$Date)
+
+df <- df %>%
+  distinct() %>%
+  drop_na()
+```
+
+## Key Metrics
+```{r}
+camp_avgs <- df %>%
+  group_by(Campaign) %>%
+  summarise(avg_imp = mean(Impressions), 
+            avg_clicks = mean(Clicks),
+            avg_purch = mean(Purchases))
+```
+
+### 1. Impressions
+```{r}
+ggplot(df, aes(x = Date, y = Impressions, color = Campaign, group = Campaign)) +
+  geom_line(size = 1) +
+  geom_hline(data = camp_avgs, aes(yintercept = avg_imp, color = Campaign), linetype = "dotted", linewidth = 0.7) +
+  scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +
+  scale_x_date(date_breaks = "5 days", date_labels = "%m.%d") +
+  scale_color_manual(values = c("Control Campaign" = "red", "Test Campaign" = "blue")) +
+  labs(
+    title = "Daily Impressions",
+    x = "Date",
+    y = "Number of Impressions",
+  ) +
+  theme_minimal() + 
+  theme(
+    plot.title = element_text(margin = margin(b = 20), size = 15, face = "bold"),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    legend.position = "bottom"
+)
+```
+
+### 2. Clicks
+```{r}
+ggplot(df, aes(x = Date, y = Clicks, color = Campaign, group = Campaign)) +
+  geom_line(size = 1) +
+  geom_hline(data = camp_avgs, aes(yintercept = avg_clicks, color = Campaign), linetype = "dotted", linewidth = 0.7) +     
+  scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +
+  scale_x_date(date_breaks = "5 days", date_labels = "%m.%d") +
+  scale_color_manual(values = c("Control Campaign" = "red", "Test Campaign" = "blue")) +
+  labs(
+    title = "Daily Clicks",
+    x = "Date",
+    y = "Number of Clicks",
+  ) +
+  theme_minimal() + 
+  theme(
+    plot.title = element_text(margin = margin(b = 20), size = 15, face = "bold"),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    legend.position = "bottom"
+)
+```
+
+### 3. Purchases
+```{r}
+ggplot(df, aes(x = Date, y = Purchases, color = Campaign, group = Campaign)) +
+  geom_line(size = 1) +
+  geom_hline(data = camp_avgs, aes(yintercept = avg_purch, color = Campaign), linetype = "dotted", linewidth = 0.7) +
+  scale_x_date(date_breaks = "5 days", date_labels = "%m.%d") +
+  scale_color_manual(values = c("Control Campaign" = "red", "Test Campaign" = "blue")) +
+  labs(
+    title = "Daily Purchases",
+    x = "Date",
+    y = "Number of Purchases",
+  ) +
+  theme_minimal() + 
+  theme(
+    plot.title = element_text(margin = margin(b = 20), size = 15, face = "bold"),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    legend.position = "bottom"
+)
+```
+
+## Marketing KPIs
+
+```{r}
+kpi_sum <- df %>%
+  group_by(Campaign) %>%
+  summarise(
+    avg_CTR = round((sum(Clicks) / sum(Impressions)) * 100, digits = 2),
+    avg_CVR = round((sum(Purchases) / sum(Clicks)) * 100, digits = 2),
+    avg_CPC = round((sum(Spend) / sum(Clicks)), digits = 2),
+    avg_CPP = round((sum(Spend) / sum(Purchases)), digits = 2)
+  )
+
+kable(kpi_sum, col.names = c(" ", "Click Through Rate", "Conversion Rate", "Cost Per Click", "Cost Per Purchase"))
+```
+
+## Hypothesis Testing
+
+H0: There is no statistically significant difference (KPI) between control and test campaigns.
+Ha: There is a statistically significant difference (KPI) between control and test campaigns.
+
+### 1. Click Through Rate  
+```{r}
+ctr_cvr <- df %>%
+  group_by(Campaign) %>%
+  summarise(
+    tot_imp = sum(Impressions), 
+    tot_clicks = sum(Clicks),
+    tot_purch = sum(Purchases)
+  )
+```
+
+```{r}
+ctr_test <- prop.test(ctr_cvr$tot_clicks, ctr_cvr$tot_imp)
+ctr_test
+```
+Test Campaign has a significantly higher click through rate compared to control campaign. It is more engaging and relevant to the audience. 
+
+### 2. Conversion Rate
+```{r}
+cvr_test <- prop.test(ctr_cvr$tot_purch, ctr_cvr$tot_clicks)
+cvr_test
+```
+Test Campaign has a significantly higher conversion rate compared to control campaign. Users are more likely to purchase after landing at the test campaign. 
+
+### 3. Cost Per Click
+```{r}
+cpc_cpp <- df %>%
+  mutate(
+    daily_cpc = Spend / Clicks,
+    daily_cpp = Spend / Purchases
+  )
+```
+
+```{r}
+cpc_test <- t.test(daily_cpc ~ Campaign, data = cpc_cpp)
+cpc_test
+```
+
+There is no significant difference in cost per click between two campaigns. 
+
+```{r}
+qqnorm(cpc_cpp$daily_cpc)
+qqline(cpc_cpp$daily_cpc, col = "red")
+```
+
+### 4. Cost Per Purchase
+```{r}
+cpp_test <- t.test(daily_cpp ~ Campaign, data = cpc_cpp)
+cpp_test
+```
+
+There is no significant difference in cost per purchase between two campaigns. 
+
+```{r}
+qqnorm(cpc_cpp$daily_cpp)
+qqline(cpc_cpp$daily_cpp, col = "red")
+```
+
+Test campaign is much efficient than the control campaign, as it has significantly higher CTR and CVR while paying the same price for each click and purchases.  
+
